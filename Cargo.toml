@@ -1,0 +1,13 @@
+[package]
+name = "steel_py"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+num-bigint = "0.4"
+num-rational = "0.4"
+pyo3 = { version = "0.21", features = ["extension-module"] }
+steel-core = "0.7.0"

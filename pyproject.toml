@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "steel-py"
+version = "0.1.0"
+description = "Simple Python bindings for Steel Scheme"
+requires-python = ">=3.8"
+
+[tool.maturin]
+module-name = "steel_py"
