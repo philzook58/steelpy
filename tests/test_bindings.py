@@ -18,7 +18,9 @@ class SteelPyBindingsTests(unittest.TestCase):
         engine = steel_py.SteelEngine()
         self.assertIsNone(engine.eval("(define counter 10)"))
         self.assertEqual(engine.eval("(+ counter 5)"), 15)
-        self.assertEqual(engine.eval("(begin (set! counter (+ counter 2)) counter)"), 12)
+        self.assertEqual(
+            engine.eval("(begin (set! counter (+ counter 2)) counter)"), 12
+        )
 
     def test_eval_with_bindings(self) -> None:
         result = steel_py.eval("(+ x y)", {"x": 4, "y": 7})
@@ -34,7 +36,7 @@ class SteelPyBindingsTests(unittest.TestCase):
 
     def test_nested_python_values_to_steel(self) -> None:
         bindings = {"payload": [1, {"ok": True}, "x"]}
-        result = steel_py.eval("(equal? payload (list 1 (hash \"ok\" #t) \"x\"))", bindings)
+        result = steel_py.eval('(equal? payload (list 1 (hash "ok" #t) "x"))', bindings)
         self.assertTrue(result)
 
     def test_rational_round_trip(self) -> None:
@@ -62,6 +64,13 @@ class SteelPyBindingsTests(unittest.TestCase):
     def test_eval_surfaces_scheme_errors(self) -> None:
         with self.assertRaises(RuntimeError):
             steel_py.eval("(+ 1 'a)")
+
+    def test_microkanren(self) -> None:
+        engine = steel_py.SteelEngine()
+        code = open("tests/microkanren.scm").read()
+        engine.eval(code)
+        assert engine.eval("(run* (x) (disj (== x 6) (== x 5)))") == [6, 5]
+        assert engine.eval("(run* (x y) (disj (== x 6) (== y 5)))") == [6, "_.0"]
 
 
 if __name__ == "__main__":

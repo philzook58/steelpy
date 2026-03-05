@@ -2,13 +2,13 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyComplex, PyDict, PyList, PySet, PyTuple};
-use steel::rvals::{IntoSteelVal, SteelComplex};
-use steel::steel_vm::engine::Engine;
-use steel::SteelVal;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::str::FromStr;
+use steel::SteelVal;
+use steel::rvals::{IntoSteelVal, SteelComplex};
+use steel::steel_vm::engine::Engine;
 
 use num_bigint::BigInt;
 use num_rational::{BigRational, Rational32};
@@ -91,7 +91,9 @@ impl SteelEngine {
 }
 
 fn eval_with_engine(py: Python<'_>, engine: &mut Engine, code: &str) -> PyResult<PyObject> {
-    let values = engine.run(code.to_owned()).map_err(|e| py_err(e.to_string()))?;
+    let values = engine
+        .run(code.to_owned())
+        .map_err(|e| py_err(e.to_string()))?;
     let last = values.last().cloned().unwrap_or(SteelVal::Void);
     steel_to_python(py, last)
 }
@@ -216,6 +218,8 @@ fn steel_number_to_f64(value: &SteelVal) -> Option<f64> {
         _ => None,
     }
 }
+// TODO: maybe distinguish strings and symbols
+// eval_from_file
 
 fn steel_to_python(py: Python<'_>, value: SteelVal) -> PyResult<PyObject> {
     match value {
