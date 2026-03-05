@@ -1,7 +1,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyComplex, PyDict, PyList, PySet, PyTuple};
+use pyo3::types::{PyAny, PyBool, PyComplex, PyDict, PyList, PySet, PyTuple};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -31,7 +31,7 @@ fn py_err(message: String) -> PyErr {
 
 #[pyfunction]
 #[pyo3(signature = (code, bindings=None))]
-fn eval(py: Python<'_>, code: &str, bindings: Option<&Bound<'_, PyDict>>) -> PyResult<PyObject> {
+fn eval(py: Python<'_>, code: &str, bindings: Option<&Bound<'_, PyDict>>) -> PyResult<Py<PyAny>> {
     ensure_steel_home()?;
     let mut engine = Engine::new();
     apply_bindings(&mut engine, bindings)?;
@@ -59,7 +59,7 @@ impl SteelEngine {
         py: Python<'_>,
         code: &str,
         bindings: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         apply_bindings(&mut self.engine, bindings)?;
         eval_with_engine(py, &mut self.engine, code)
     }
@@ -76,7 +76,7 @@ impl SteelEngine {
         py: Python<'_>,
         name: &str,
         args: &Bound<'_, PyTuple>,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let mut converted = Vec::with_capacity(args.len());
         for item in args.iter() {
             converted.push(py_to_steel(&item)?);
@@ -90,7 +90,7 @@ impl SteelEngine {
     }
 }
 
-fn eval_with_engine(py: Python<'_>, engine: &mut Engine, code: &str) -> PyResult<PyObject> {
+fn eval_with_engine(py: Python<'_>, engine: &mut Engine, code: &str) -> PyResult<Py<PyAny>> {
     let values = engine
         .run(code.to_owned())
         .map_err(|e| py_err(e.to_string()))?;
@@ -123,7 +123,7 @@ fn py_to_steel(value: &Bound<'_, PyAny>) -> PyResult<SteelVal> {
     if is_fraction_instance(value)? {
         return py_fraction_to_steel(value);
     }
-    if let Ok(v) = value.downcast::<PyComplex>() {
+    if let Ok(v) = value.cast::<PyComplex>() {
         let complex = SteelComplex::new(SteelVal::NumV(v.real()), SteelVal::NumV(v.imag()));
         return complex.into_steelval().map_err(|e| py_err(e.to_string()));
     }
@@ -140,21 +140,21 @@ fn py_to_steel(value: &Bound<'_, PyAny>) -> PyResult<SteelVal> {
     if let Ok(v) = value.extract::<String>() {
         return v.into_steelval().map_err(|e| py_err(e.to_string()));
     }
-    if let Ok(v) = value.downcast::<PyList>() {
+    if let Ok(v) = value.cast::<PyList>() {
         let mut out = Vec::with_capacity(v.len());
         for item in v.iter() {
             out.push(py_to_steel(&item)?);
         }
         return out.into_steelval().map_err(|e| py_err(e.to_string()));
     }
-    if let Ok(v) = value.downcast::<PyTuple>() {
+    if let Ok(v) = value.cast::<PyTuple>() {
         let mut out = Vec::with_capacity(v.len());
         for item in v.iter() {
             out.push(py_to_steel(&item)?);
         }
         return out.into_steelval().map_err(|e| py_err(e.to_string()));
     }
-    if let Ok(v) = value.downcast::<PyDict>() {
+    if let Ok(v) = value.cast::<PyDict>() {
         let mut out: HashMap<SteelVal, SteelVal> = HashMap::new();
         for (k, val) in v.iter() {
             out.insert(py_to_steel(&k)?, py_to_steel(&val)?);
@@ -170,7 +170,7 @@ fn py_to_steel(value: &Bound<'_, PyAny>) -> PyResult<SteelVal> {
 
 fn is_fraction_instance(value: &Bound<'_, PyAny>) -> PyResult<bool> {
     let py = value.py();
-    let fractions = py.import_bound("fractions")?;
+    let fractions = py.import("fractions")?;
     let fraction_type = fractions.getattr("Fraction")?;
     value.is_instance(&fraction_type)
 }
@@ -194,14 +194,17 @@ fn py_fraction_to_steel(value: &Bound<'_, PyAny>) -> PyResult<SteelVal> {
         .map_err(|e| py_err(e.to_string()))
 }
 
-fn python_fraction_from_parts(py: Python<'_>, numer: &str, denom: &str) -> PyResult<PyObject> {
-    let fractions = py.import_bound("fractions")?;
+fn python_fraction_from_parts(py: Python<'_>, numer: &str, denom: &str) -> PyResult<Py<PyAny>> {
+    let fractions = py.import("fractions")?;
     let fraction_type = fractions.getattr("Fraction")?;
-    let builtins = py.import_bound("builtins")?;
+    let builtins = py.import("builtins")?;
     let int_type = builtins.getattr("int")?;
     let py_numer = int_type.call1((numer,))?;
     let py_denom = int_type.call1((denom,))?;
-    Ok(fraction_type.call1((py_numer, py_denom))?.into_py(py))
+    Ok(fraction_type
+        .call1((py_numer, py_denom))?
+        .into_any()
+        .unbind())
 }
 
 fn steel_number_to_f64(value: &SteelVal) -> Option<f64> {
@@ -221,11 +224,11 @@ fn steel_number_to_f64(value: &SteelVal) -> Option<f64> {
 // TODO: maybe distinguish strings and symbols
 // eval_from_file
 
-fn steel_to_python(py: Python<'_>, value: SteelVal) -> PyResult<PyObject> {
+fn steel_to_python(py: Python<'_>, value: SteelVal) -> PyResult<Py<PyAny>> {
     match value {
-        SteelVal::BoolV(v) => Ok(v.into_py(py)),
-        SteelVal::IntV(v) => Ok(v.into_py(py)),
-        SteelVal::NumV(v) => Ok(v.into_py(py)),
+        SteelVal::BoolV(v) => Ok(PyBool::new(py, v).to_owned().into_any().unbind()),
+        SteelVal::IntV(v) => Ok(v.into_pyobject(py)?.unbind().into_any()),
+        SteelVal::NumV(v) => Ok(v.into_pyobject(py)?.unbind().into_any()),
         SteelVal::Rational(v) => {
             python_fraction_from_parts(py, &v.numer().to_string(), &v.denom().to_string())
         }
@@ -237,38 +240,38 @@ fn steel_to_python(py: Python<'_>, value: SteelVal) -> PyResult<PyObject> {
                 .ok_or_else(|| py_err("Unable to convert complex real part".to_owned()))?;
             let im = steel_number_to_f64(&v.im)
                 .ok_or_else(|| py_err("Unable to convert complex imaginary part".to_owned()))?;
-            Ok(PyComplex::from_doubles_bound(py, re, im)
+            Ok(PyComplex::from_doubles(py, re, im)
                 .into_any()
                 .unbind()
                 .into())
         }
-        SteelVal::StringV(v) => Ok(v.to_string().into_py(py)),
-        SteelVal::SymbolV(v) => Ok(v.to_string().into_py(py)),
-        SteelVal::CharV(v) => Ok(v.to_string().into_py(py)),
+        SteelVal::StringV(v) => Ok(v.to_string().into_pyobject(py)?.unbind().into_any()),
+        SteelVal::SymbolV(v) => Ok(v.to_string().into_pyobject(py)?.unbind().into_any()),
+        SteelVal::CharV(v) => Ok(v.to_string().into_pyobject(py)?.unbind().into_any()),
         SteelVal::Void => Ok(py.None()),
         SteelVal::VectorV(v) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in v.iter() {
                 list.append(steel_to_python(py, item.clone())?)?;
             }
             Ok(list.into_any().unbind())
         }
         SteelVal::ListV(v) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in v.iter() {
                 list.append(steel_to_python(py, item.clone())?)?;
             }
             Ok(list.into_any().unbind())
         }
         SteelVal::MutableVector(v) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in v.get() {
                 list.append(steel_to_python(py, item)?)?;
             }
             Ok(list.into_any().unbind())
         }
         SteelVal::HashMapV(v) => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             for (key, val) in v.iter() {
                 let py_val = steel_to_python(py, val.clone())?;
                 match dict.set_item(steel_to_python(py, key.clone())?, &py_val) {
@@ -281,7 +284,7 @@ fn steel_to_python(py: Python<'_>, value: SteelVal) -> PyResult<PyObject> {
             Ok(dict.into_any().unbind())
         }
         SteelVal::HashSetV(v) => {
-            let set = PySet::empty_bound(py)?;
+            let set = PySet::empty(py)?;
             for item in v.iter() {
                 set.add(steel_to_python(py, item.clone())?)?;
             }
@@ -290,9 +293,9 @@ fn steel_to_python(py: Python<'_>, value: SteelVal) -> PyResult<PyObject> {
         SteelVal::Pair(pair) => {
             let car = steel_to_python(py, pair.car())?;
             let cdr = steel_to_python(py, pair.cdr())?;
-            Ok((car, cdr).into_py(py))
+            Ok(PyTuple::new(py, [car, cdr])?.into_any().unbind())
         }
-        other => Ok(other.to_string().into_py(py)),
+        other => Ok(other.to_string().into_pyobject(py)?.unbind().into_any()),
     }
 }
 
